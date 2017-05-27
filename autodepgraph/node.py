@@ -206,14 +206,16 @@ class CalibrationNode(Instrument):
             any_state -> good
 
         Executing a node performs the following steps:
-            1. get the state of the dependency nodes. If all are OK or unknown,
-               perform a check on the node itself.
-               If a node is any other state, execute it to move it to a
+            1. Get the state of the dependency nodes (parents). If all are
+               good or unknown, perform a check on the node itself.
+               If a parent is in any other state, execute it to move it to a
                good state
-            2. perform the "check" experiment on the node itself. This quick
-               check
-            3. Perform calibration and second round of executing dependencies
-
+            2. Perform the "check" experiment on the node itself. This check
+               is much faster than the calibration routine and determines
+               the current state of the node.
+            3. If necessary, try to calibrate the node. If this fails,
+               execute all parent nodes and try to calibrate again after
+               that.
         """
         self._exec_cnt += 1
         if not hasattr(self, '_parenth_graph'):
@@ -224,14 +226,14 @@ class CalibrationNode(Instrument):
 
         # 1. Going over the states of the dependencies
         # get the last known states of all dependencies
-        dep_states = []
+        calibrated = []
         for dep_name in self.parents():
             dep_state = self.find_instrument(dep_name).state()
-            dep_states += [dep_state]
             if dep_state in ['good', 'unknown']:
                 continue  # to self.check()
             else:
                 # executing a node should change the state to good
+                calibrated += dep_name
                 dep_state = self.find_instrument(dep_name).execute_node(
                     verbose=verbose)
                 if dep_state == 'bad':
@@ -259,8 +261,9 @@ class CalibrationNode(Instrument):
             # if the state is bad it will execute *all* dependencies. Even
             # the ones that were updated before.
             for dep_name in self.parents():
-                dep = self.find_instrument(dep_name)
-                dep.execute_node(verbose=verbose)
+                if dep_name not in calibrated:
+                    dep = self.find_instrument(dep_name)
+                    dep.execute_node(verbose=verbose)
             self.calibrate()
             if self.state() != 'good':
                 raise ValueError(
